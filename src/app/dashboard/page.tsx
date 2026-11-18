@@ -1,0 +1,23 @@
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import { ProfileEditor, GameAccountLinker } from "@/components/dashboard-controls";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+
+export default async function DashboardPage() {
+  const supabase = await createSupabaseServerClient();
+  if (!supabase) return <main className="auth-page"><section className="auth-panel"><p className="eyebrow">Player dashboard</p><h1>Supabase<br />not connected.</h1><p className="auth-copy">Add your project URL and anon key to enable player profiles, registrations, and points.</p><Link className="button" href="/">Back to tournaments</Link></section></main>;
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login");
+  const { data: profile } = await supabase.from("profiles").select("username, display_name, bio, avatar_url, points_balance").eq("id", user.id).single();
+  const { data: registrations } = await supabase.from("tournament_registrations").select("id, status, tournament_id").eq("player_id", user.id).order("created_at", { ascending: false }).limit(5);
+  const { data: gameAccounts } = await supabase.from("connected_game_accounts").select("id, verification_status").eq("player_id", user.id);
+  const { data: teams } = await supabase.from("team_members").select("team_id, role, teams(name, slug)").eq("player_id", user.id);
+  const { data: invitations } = await supabase.from("team_invitations").select("id, status, teams(name)").eq("invited_player_id", user.id).eq("status", "pending");
+  const { data: ledger } = await supabase.from("point_transactions").select("kind, amount, description, created_at").eq("player_id", user.id).order("created_at", { ascending: false }).limit(8);
+  const tournamentIds = [...new Set((registrations ?? []).map((entry) => entry.tournament_id))];
+  const { data: tournamentRows } = tournamentIds.length ? await supabase.from("tournaments").select("id, name").in("id", tournamentIds) : { data: [] };
+  const tournamentNames = new Map((tournamentRows ?? []).map((tournament) => [tournament.id, tournament.name]));
+
+  return <main className="dashboard-page"><div className="dashboard-top"><Link className="brand" href="/"><span className="brand-mark">A</span><span>ARENA<span className="brand-dot">.</span></span></Link><form action="/auth/signout" method="post"><button className="text-button">Log out</button></form></div><section className="dashboard-content"><p className="eyebrow">PLAYER HQ / {profile?.username ?? "PLAYER"}</p><h1>Good to see you, {profile?.display_name || profile?.username || "player"}.</h1><div className="dashboard-stats"><div><span>REWARD POINTS</span><strong>{profile?.points_balance ?? 0}</strong></div><div><span>TOURNAMENT ENTRIES</span><strong>{registrations?.length ?? 0}</strong></div><div><span>CONNECTED GAMES</span><strong>{gameAccounts?.length ?? 0}</strong></div></div><div className="dashboard-grid"><ProfileEditor username={profile?.username ?? ""} displayName={profile?.display_name ?? ""} bio={profile?.bio ?? ""} avatarUrl={profile?.avatar_url ?? ""} /><GameAccountLinker /></div><h2>Your registrations</h2>{registrations?.length ? <ul className="registration-list">{registrations.map((entry) => <li key={entry.id}><span>{tournamentNames.get(entry.tournament_id) ?? "Tournament"}</span><span className="status-tag">{entry.status}</span></li>)}</ul> : <p className="auth-copy">No tournament entries yet. The bracket is waiting.</p>}<div className="dashboard-grid"><section><h2>Your teams</h2>{teams?.length ? <ul className="registration-list">{teams.map((entry) => { const team = Array.isArray(entry.teams) ? entry.teams[0] : entry.teams; return <li key={entry.team_id}><span>{team?.name ?? "Team"}</span><span className="status-tag">{entry.role}</span></li>; })}</ul> : <p className="auth-copy">No teams joined yet.</p>}</section><section><h2>Team invitations</h2>{invitations?.length ? <ul className="registration-list">{invitations.map((entry) => { const team = Array.isArray(entry.teams) ? entry.teams[0] : entry.teams; return <li key={entry.id}><span>{team?.name ?? "Team"}</span><span className="status-tag">Pending</span></li>; })}</ul> : <p className="auth-copy">No pending invitations.</p>}</section></div><h2>Points ledger</h2>{ledger?.length ? <ul className="registration-list">{ledger.map((entry, index) => <li key={`${entry.created_at}-${index}`}><span>{entry.description}</span><span className="status-tag">{entry.kind} · {entry.amount}</span></li>)}</ul> : <p className="auth-copy">No point transactions yet.</p>}<Link className="button" href="/#tournaments">Browse tournaments</Link></section></main>;
+}
