@@ -4,4 +4,4 @@ out/
 .env
 !.env.example
 coverage/
-npm-debug.log*
+npm-debug.log**.tsbuildinfo
