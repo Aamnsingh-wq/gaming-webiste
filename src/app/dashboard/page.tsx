@@ -56,6 +56,12 @@ export default async function DashboardPage() {
         </div>
       </div>
 
+      {viewer.isAdmin && (
+        <div className="admin-banner reveal">
+          <div><p className="eyebrow" style={{ margin: "0 0 6px" }}><Shield size={13} />Administrator</p><strong style={{ fontFamily: "var(--font-display)", fontSize: 20 }}>Create tournaments, approve entries, draw brackets and verify results.</strong></div>
+          <div className="row"><Link className="btn btn-primary" href="/admin?tab=tournaments#create">Create tournament</Link><Link className="btn btn-neon" href="/admin">Open admin panel</Link></div>
+        </div>
+      )}
       <div className="stat-grid reveal reveal-2" style={{ marginBottom: 32 }}>
         <Stat icon={Coins} label="Reward points" value={formatNumber(viewer.points)} accent="var(--lime)" />
         <Stat icon={Trophy} label="Active entries" value={entryCount.count ?? 0} />

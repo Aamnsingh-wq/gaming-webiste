@@ -120,6 +120,7 @@ button { cursor: pointer; }
 .avatar-lg { width: 72px; height: 72px; border-radius: 18px; font-size: 26px; }
 .avatar-xl { width: 104px; height: 104px; border-radius: 24px; font-size: 38px; }
 .menu-toggle { display: none; }
+.admin-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 18px 20px; margin-bottom: 28px; border-radius: var(--radius); border: 1px solid rgba(0, 229, 255, .4); background: linear-gradient(90deg, rgba(0, 229, 255, .12), rgba(139, 92, 246, .12)); }
 .mobile-nav { display: none; }
 
 /* ---------- Badges ---------- */
@@ -434,6 +435,8 @@ button { cursor: pointer; }
   .card { padding: 18px; }
   .product-img { width: calc(100% + 36px); margin: -18px -18px 8px; }
   .points-chip { display: none; }
+  .hide-sm { display: none; }
+  .header-actions { gap: 8px; }
   .footer-grid { grid-template-columns: 1fr; }
   .match-admin { grid-template-columns: 1fr; }
   .admin-row-actions { justify-content: flex-start; }

@@ -16,7 +16,7 @@ export async function SiteHeader() {
         <div className="header-actions">
           {viewer ? (
             <>
-              {viewer.isAdmin && <Link className="btn btn-ghost btn-sm hide-mobile" href="/admin"><ShieldCheck size={15} /> Admin</Link>}
+              {viewer.isAdmin && <Link className="btn btn-neon btn-sm" href="/admin" aria-label="Admin panel"><ShieldCheck size={15} /><span className="hide-sm">Admin</span></Link>}
               <Link className="points-chip" href="/rewards" title="Reward points"><Coins size={14} /> {formatNumber(viewer.points)}</Link>
               <Link href="/dashboard" aria-label="Your dashboard" title="Player HQ"><Avatar name={viewer.displayName} src={viewer.avatarUrl} /></Link>
             </>
