@@ -1,30 +1,29 @@
-import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { z } from "zod";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { TAGS } from "@/lib/data/public";
+import { dbError, handler, HttpError, json, parseBody, requireUser } from "@/lib/http";
+import { optionalHttpUrl, usernameSchema } from "@/lib/validation";
 
 const profileSchema = z.object({
-  username: z.string().trim().regex(/^[A-Za-z0-9_]{3,24}$/),
+  username: usernameSchema,
   displayName: z.string().trim().min(1).max(60),
   bio: z.string().trim().max(500).default(""),
-  avatarUrl: z.string().url().max(2048).nullable().optional(),
+  avatarUrl: optionalHttpUrl,
 });
 
-export async function PATCH(request: Request) {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return NextResponse.json({ error: "Supabase is not configured." }, { status: 503 });
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-
-  const parsed = profileSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid profile details.", details: parsed.error.flatten() }, { status: 400 });
-
+export const PATCH = handler(async (request: Request) => {
+  const { supabase, user } = await requireUser();
+  const input = await parseBody(request, profileSchema);
   const { error } = await supabase.from("profiles").update({
-    username: parsed.data.username,
-    display_name: parsed.data.displayName,
-    bio: parsed.data.bio,
-    avatar_url: parsed.data.avatarUrl ?? null,
+    username: input.username,
+    display_name: input.displayName,
+    bio: input.bio,
+    avatar_url: input.avatarUrl,
     updated_at: new Date().toISOString(),
   }).eq("id", user.id);
-  if (error) return NextResponse.json({ error: "Profile could not be updated." }, { status: 400 });
-  return NextResponse.json({ updated: true });
-}
+  if (error?.code === "23505") throw new HttpError(409, "That username is already taken.");
+  if (error) throw dbError(error, "Profile could not be updated.");
+  revalidateTag(TAGS.leaderboard);
+  revalidateTag(TAGS.teams);
+  return json({ updated: true });
+});

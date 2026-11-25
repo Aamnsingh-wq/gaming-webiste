@@ -1,7 +1,13 @@
 node_modules/
 .next/
 out/
-.env
-!.env.example
 coverage/
-npm-debug.log**.tsbuildinfo
+
+# env files (only the example is committed)
+.env
+.env*.local
+.env.*
+!.env.example
+
+npm-debug.log*
+*.tsbuildinfo

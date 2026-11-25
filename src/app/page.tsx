@@ -1,37 +1,125 @@
 import Link from "next/link";
-import { ArrowDown, ArrowUpRight, Play, Radio, Trophy, Users } from "lucide-react";
-import { SiteHeader } from "@/components/site-header";
-import { TournamentBrowser } from "@/components/tournament-browser";
-import { previewTournaments } from "@/lib/preview-data";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import type { Tournament, TournamentResponse } from "@/lib/platform-types";
-
-async function getTournamentData(): Promise<TournamentResponse> {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return { tournaments: previewTournaments, source: "preview" };
-
-  const { data, error } = await supabase.from("tournaments").select("id, slug, name, game:games(slug), format, starts_at, registration_closes_at, capacity, prize_label, status, accent").in("status", ["registration_open", "upcoming", "live"]).order("starts_at", { ascending: true });
-  if (error || !data?.length) return { tournaments: [], source: "supabase" };
-  const ids = data.map((item) => item.id);
-  const { data: registrations } = await supabase.from("tournament_registrations").select("tournament_id").in("tournament_id", ids);
-  const counts = new Map<string, number>();
-  for (const registration of registrations ?? []) counts.set(registration.tournament_id, (counts.get(registration.tournament_id) ?? 0) + 1);
-  const tournaments: Tournament[] = data.map((item) => {
-    const game = Array.isArray(item.game) ? item.game[0] : item.game;
-    return { id: item.id, slug: item.slug, name: item.name, game: (game?.slug ?? "bgmi") as Tournament["game"], format: item.format, startsAt: item.starts_at, registrationClosesAt: item.registration_closes_at, entryCount: counts.get(item.id) ?? 0, capacity: item.capacity, prizeLabel: item.prize_label, status: item.status, accent: item.accent };
-  });
-  return { tournaments, source: "supabase" };
-}
-
-const games = ["BGMI", "Brawl Stars", "Minecraft", "Free Fire", "VALORANT"];
+import { ArrowRight, Coins, Crown, GitBranch, ShieldCheck, Trophy, Users } from "lucide-react";
+import { TournamentCard } from "@/components/tournament-card";
+import { Avatar, EmptyState } from "@/components/ui";
+import { getLeaderboards, getPlatformStats, getTournamentFeed } from "@/lib/data/public";
+import { formatNumber } from "@/lib/format";
+import { GAMES } from "@/lib/games";
+import { getViewer } from "@/lib/supabase/server";
 
 export default async function HomePage() {
-  const tournamentData = await getTournamentData();
-  return <><SiteHeader /><main><section className="hero"><div className="hero-grid" /><div className="hero-copy"><p className="hero-kicker"><span className="live-dot" /> COMMUNITY BUILT. COMPETITION READY.</p><h1>Play hard.<br /><span>Leave a mark.</span></h1><p className="hero-description">Your community is the competition. Enter the arena, find your squad, and make every match count.</p><div className="hero-actions"><Link className="button" href="#tournaments">Find your tournament <ArrowUpRight size={17} /></Link><Link className="hero-secondary" href="/register"><Play size={15} fill="currentColor" /> Create player account</Link></div><div className="hero-stats"><div><strong>05</strong><span>GAMES</span></div><div><strong>01</strong><span>COMMUNITY</span></div><div><strong>∞</strong><span>RIVALRIES</span></div></div></div><div className="hero-art" aria-label="Abstract tournament arena artwork"><div className="hero-ring ring-one" /><div className="hero-ring ring-two" /><div className="hero-cross">A</div><div className="hero-coordinate">19°04&apos;N<br />72°52&apos;E</div><div className="hero-vertical">ARENA / EST. MMXXVI</div><div className="hero-art-label"><span>COMMUNITY<br />MATCHMAKING</span><span>01 — 05</span></div></div><a className="scroll-hint" href="#tournaments"><ArrowDown size={15} /> SCOUT THE FIELD</a><div className="hero-index">01 <span>/</span> 04</div></section>
-    <section className="tournaments-section section-wrap" id="tournaments"><div className="section-heading"><div><p className="eyebrow">THE COMPETITION BOARD</p><h2>Every match starts<br />with a <span>yes.</span></h2></div><p className="section-aside">Solo queue is over. Find a bracket, show up for your people, and earn your place on the board.</p></div><TournamentBrowser initialData={tournamentData} /></section>
-    <section className="games-section" id="games"><div className="section-wrap games-inner"><div><p className="eyebrow">ONE COMMUNITY / FIVE WORLDS</p><h2>Choose your<br /><span>battlefield.</span></h2></div><div className="game-list">{games.map((game, index) => <div className="game-row" key={game}><span className="game-number">0{index + 1}</span><span>{game}</span><ArrowUpRight size={17} /></div>)}</div></div></section>
-    <section className="community-section section-wrap" id="rankings"><div className="community-art"><div className="score-slab"><Trophy size={21} /><span>YOUR NEXT<br />W IS CLOSER.</span><strong>+ XP</strong></div><div className="community-stamp">PLAY / PROVE / REPEAT</div></div><div className="community-copy"><p className="eyebrow">MORE THAN A MATCH</p><h2>Bring your<br />people. <span>Build<br />your legacy.</span></h2><p>Make a team, track every finish, and turn community nights into a story worth telling. The ladder moves when you do.</p><div className="community-features"><span><Users size={16} /> TEAM PROFILES</span><span><Radio size={16} /> LIVE BRACKETS</span></div><Link className="button" href="/register">Make your player card <ArrowUpRight size={16} /></Link></div></section>
-    <section className="rewards-strip" id="rewards"><div className="section-wrap rewards-inner"><p className="eyebrow">EVERY GAME COUNTS</p><h2>Show up. Stack points.<br /><span>Cash in your good work.</span></h2><Link className="button button-dark" href="/register">Get in the game <ArrowUpRight size={16} /></Link><div className="reward-sticker">PLAY<br />EARN<br />REPEAT</div></div></section>
-    <footer className="site-footer"><Link className="brand" href="/"><span className="brand-mark">A</span><span>ARENA<span className="brand-dot">.</span></span></Link><p>Built by the community. Played everywhere.</p><div><Link href="/login">Player login</Link><a href="mailto:hello@arena.community">Contact</a><a href="#games">Games</a></div><span className="footer-copy">© 2026 ARENA COMMUNITY</span></footer>
-  </main></>;
+  const [feed, stats, boards, viewer] = await Promise.all([getTournamentFeed(), getPlatformStats(), getLeaderboards(5), getViewer()]);
+  const active = feed.tournaments.filter((item) => item.status !== "completed");
+  const featured = active.find((item) => item.status === "live") ?? active.find((item) => item.status === "registration_open") ?? active[0];
+  const perGame = new Map<string, number>();
+  for (const item of active) perGame.set(item.game, (perGame.get(item.game) ?? 0) + 1);
+  const topPlayers = boards.players.slice(0, 5);
+
+  return (
+    <main>
+      <section className="hero">
+        <div className="hero-bg" aria-hidden="true"><div className="hero-grid" /><div className="hero-orb one" /><div className="hero-orb two" /></div>
+        <div className="container hero-inner">
+          <div>
+            <p className="hero-kicker reveal"><i className="pulse" aria-hidden="true" />{active.some((item) => item.status === "live") ? "Matches live now" : "Season registrations open"}</p>
+            <h1 className="reveal reveal-2">Compete.<br /><span className="gradient-text">Conquer.</span><br />Get paid in glory.</h1>
+            <p className="lead reveal reveal-3">Community tournaments for BGMI, VALORANT, Brawl Stars, Free Fire, and Minecraft. Verified brackets, real rankings, and rewards for every match you play.</p>
+            <div className="hero-actions reveal reveal-4">
+              <Link className="btn btn-primary" href="/tournaments">Browse tournaments <ArrowRight size={17} /></Link>
+              <Link className="btn btn-neon" href={viewer ? "/dashboard" : "/register"}>{viewer ? "Open Player HQ" : "Create player card"}</Link>
+            </div>
+            <div className="hero-stats reveal reveal-4">
+              <div><strong>{formatNumber(stats.players)}</strong><span>Players</span></div>
+              <div><strong>{formatNumber(stats.teams)}</strong><span>Teams</span></div>
+              <div><strong>{formatNumber(stats.tournaments)}</strong><span>Tournaments</span></div>
+              <div><strong>{GAMES.length}</strong><span>Games</span></div>
+            </div>
+          </div>
+          {featured && <div className="hero-feature reveal reveal-3"><TournamentCard tournament={featured} /></div>}
+        </div>
+      </section>
+
+      <div className="marquee" aria-hidden="true">
+        <div className="marquee-track">
+          {[...GAMES, ...GAMES, ...GAMES, ...GAMES].map((game, index) => (
+            <span className="marquee-item" key={`${game.slug}-${index}`} style={{ "--item-accent": game.accent } as React.CSSProperties}><i />{game.name}</span>
+          ))}
+        </div>
+      </div>
+
+      <section className="section">
+        <div className="container">
+          <div className="section-head">
+            <div><p className="eyebrow">The competition board</p><h2 className="section-title">Open tournaments</h2></div>
+            <Link className="link" href="/tournaments">View all <ArrowRight size={16} /></Link>
+          </div>
+          {feed.error && <p className="notice notice-error" style={{ marginBottom: 20 }}>{feed.error}</p>}
+          {active.length ? (
+            <div className="tournament-grid">{active.slice(0, 6).map((tournament, index) => <TournamentCard key={tournament.id} tournament={tournament} index={index} />)}</div>
+          ) : (
+            <EmptyState icon={Trophy} title="No open tournaments yet">The next season is being drafted. Create your account now and you&apos;ll be ready when registration opens.</EmptyState>
+          )}
+          {feed.source === "preview" && <p className="notice notice-info" style={{ marginTop: 20 }}>Preview data — connect Supabase to publish live events and accept registrations.</p>}
+        </div>
+      </section>
+
+      <section className="section" style={{ paddingTop: 0 }}>
+        <div className="container">
+          <div className="section-head"><div><p className="eyebrow">Five worlds, one ladder</p><h2 className="section-title">Choose your battlefield</h2></div></div>
+          <div className="game-tiles">
+            {GAMES.map((game) => (
+              <Link key={game.slug} className="game-tile" href={`/tournaments?game=${game.slug}`} style={{ "--accent": game.accent } as React.CSSProperties}>
+                <span className="badge">{game.genre}</span>
+                <div><span className="count">{String(perGame.get(game.slug) ?? 0).padStart(2, "0")}</span><h3>{game.name}</h3><span className="faint" style={{ fontSize: 13 }}>active events</span></div>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section" style={{ paddingTop: 0 }}>
+        <div className="container grid-2" style={{ alignItems: "start", gap: 28 }}>
+          <div>
+            <p className="eyebrow">Hall of fame</p>
+            <h2 className="section-title">Top of the ladder</h2>
+            <p className="lead">Rankings update from verified match results and awarded points. Every win moves you up.</p>
+            <div className="feature-list" style={{ gridTemplateColumns: "1fr", marginTop: 28 }}>
+              <div className="feature"><span className="feature-icon"><GitBranch size={20} /></span><div><h3>Live brackets</h3><p>Seeded single-elimination brackets with automatic byes and winner advancement.</p></div></div>
+              <div className="feature"><span className="feature-icon"><ShieldCheck size={20} /></span><div><h3>Verified results</h3><p>Admins confirm every result with evidence before it counts.</p></div></div>
+              <div className="feature"><span className="feature-icon"><Coins size={20} /></span><div><h3>Rewards that matter</h3><p>Earn points for placements and redeem them in the rewards vault.</p></div></div>
+            </div>
+          </div>
+          <div className="card panel-glow">
+            <div className="spread" style={{ marginBottom: 8 }}><h3 className="card-title" style={{ margin: 0 }}><Crown size={18} style={{ verticalAlign: "-3px", color: "var(--amber)", marginRight: 8 }} />Top players</h3><Link className="link" href="/leaderboard">Full board <ArrowRight size={15} /></Link></div>
+            {topPlayers.length ? (
+              <ol className="list">
+                {topPlayers.map((player, index) => (
+                  <li key={player.player_id} className="list-item">
+                    <span className="who"><span className="rank-cell" style={{ width: 28, color: index === 0 ? "var(--amber)" : undefined }}>{index + 1}</span><Avatar name={player.display_name || player.username} src={player.avatar_url} /><span style={{ minWidth: 0 }}><span className="who-name" style={{ display: "block" }}>{player.display_name || player.username}</span><span className="who-sub">@{player.username} · {player.match_wins} wins</span></span></span>
+                    <span className="amount-plus">{formatNumber(player.points_earned)} pts</span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <EmptyState icon={Users} title="The ladder is empty">Be the first name on the board — results appear as soon as matches are verified.</EmptyState>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="section" style={{ paddingTop: 0 }}>
+        <div className="container">
+          <div className="cta-band">
+            <p className="eyebrow">Squad up</p>
+            <h2>Bring your people. <span className="gradient-text">Build a legacy.</span></h2>
+            <p className="lead">Create a team, invite your roster, and register for team events with one click as captain.</p>
+            <div className="hero-actions">
+              <Link className="btn btn-primary" href={viewer ? "/teams" : "/register"}>{viewer ? "Manage your team" : "Get started free"} <ArrowRight size={17} /></Link>
+              <Link className="btn btn-ghost" href="/teams">Browse teams</Link>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  );
 }

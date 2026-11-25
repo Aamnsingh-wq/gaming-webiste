@@ -1,21 +1,16 @@
-import { NextResponse } from "next/server";
-import { getAdministrator } from "@/lib/supabase/authorization";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { revalidateTag } from "next/cache";
+import { TAGS } from "@/lib/data/public";
+import { dbError, handler, HttpError, json, parseBody, requireAdmin } from "@/lib/http";
 import { tournamentInputSchema } from "@/lib/tournaments/schemas";
 
-export async function POST(request: Request) {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return NextResponse.json({ error: "Supabase is not configured." }, { status: 503 });
-  const { user, authorized } = await getAdministrator(supabase);
-  if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-  if (!authorized) return NextResponse.json({ error: "Administrator access required." }, { status: 403 });
+export const POST = handler(async (request: Request) => {
+  const { supabase, user } = await requireAdmin();
+  const input = await parseBody(request, tournamentInputSchema);
+  const { data: game } = await supabase.from("games").select("id").eq("slug", input.gameSlug).maybeSingle();
+  if (!game) throw new HttpError(404, "Game not found.");
 
-  const parsed = tournamentInputSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid tournament details.", details: parsed.error.flatten() }, { status: 400 });
-
-  const input = parsed.data;
   const { data, error } = await supabase.from("tournaments").insert({
-    game_id: input.gameId,
+    game_id: game.id,
     slug: input.slug,
     name: input.name,
     description: input.description,
@@ -27,11 +22,14 @@ export async function POST(request: Request) {
     team_size: input.teamSize,
     prize_label: input.prizeLabel,
     accent: input.accent,
+    banner_url: input.bannerUrl ?? null,
     created_by: user.id,
     status: "draft",
   }).select("id, slug, name, status").single();
+  if (error?.code === "23505") throw new HttpError(409, "A tournament with that URL already exists.");
+  if (error) throw dbError(error, "Tournament could not be created.");
 
-  if (error) return NextResponse.json({ error: "Tournament could not be created." }, { status: 400 });
   await supabase.from("audit_logs").insert({ actor_id: user.id, action: "tournament.created", entity_type: "tournament", entity_id: data.id });
-  return NextResponse.json(data, { status: 201 });
-}
+  revalidateTag(TAGS.tournaments);
+  return json(data, 201);
+});

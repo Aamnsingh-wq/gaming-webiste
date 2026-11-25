@@ -3,48 +3,74 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { FeedbackNotice, SubmitLabel } from "@/components/feedback";
+import type { Feedback } from "@/components/use-api";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-export function AuthForm({ mode }: { mode: "login" | "register" }) {
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState(false);
-  const router = useRouter();
-  const registering = mode === "register";
+type Mode = "login" | "register" | "forgot";
 
-  async function submit(formData: FormData) {
-    setBusy(true);
-    setMessage("");
+export function AuthForm({ mode: initialMode, next = "/dashboard" }: { mode: "login" | "register"; next?: string }) {
+  const router = useRouter();
+  const [mode, setMode] = useState<Mode>(initialMode);
+  const [busy, setBusy] = useState(false);
+  const [feedback, setFeedback] = useState<Feedback>(null);
+  const callback = (path: string) => `${window.location.origin}/auth/callback?next=${encodeURIComponent(path)}`;
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
     const supabase = createSupabaseBrowserClient();
-    if (!supabase) {
-      setMessage("Authentication is not enabled yet. Add the Supabase URL and anon key to .env.local.");
-      setBusy(false);
-      return;
-    }
-    const email = String(formData.get("email") ?? "").trim();
-    const password = String(formData.get("password") ?? "");
-    const result = registering
-      ? await supabase.auth.signUp({ email, password, options: { data: { username: String(formData.get("username") ?? "").trim() } } })
-      : await supabase.auth.signInWithPassword({ email, password });
-    if (result.error) {
-      setMessage(result.error.message);
-    } else if (registering && !result.data.session) {
-      setMessage("Check your inbox to verify your email and finish creating your account.");
-    } else {
-      router.push("/dashboard");
+    if (!supabase) return setFeedback({ tone: "error", text: "Authentication is not enabled yet. Add the Supabase URL and anon key to .env.local." });
+    const email = String(form.get("email") ?? "").trim();
+    const password = String(form.get("password") ?? "");
+    setBusy(true);
+    setFeedback(null);
+    try {
+      if (mode === "forgot") {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: callback("/reset-password") });
+        setFeedback(error ? { tone: "error", text: error.message } : { tone: "success", text: "If that email is registered, a reset link is on its way." });
+        return;
+      }
+      if (mode === "register") {
+        const username = String(form.get("username") ?? "").trim();
+        const { data, error } = await supabase.auth.signUp({ email, password, options: { data: { username, display_name: username }, emailRedirectTo: callback(next) } });
+        if (error) return setFeedback({ tone: "error", text: error.message });
+        if (!data.session) return setFeedback({ tone: "success", text: "Check your inbox to confirm your email and finish creating your account." });
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) return setFeedback({ tone: "error", text: error.message === "Invalid login credentials" ? "Email or password is incorrect." : error.message });
+      }
+      router.replace(next);
       router.refresh();
+    } catch {
+      setFeedback({ tone: "error", text: "Network error — please try again." });
+    } finally {
+      setBusy(false);
     }
-    setBusy(false);
   }
 
   return (
-    <form className="auth-form" action={(formData) => void submit(formData)}>
-      {registering && <label>Player name<input name="username" autoComplete="username" minLength={3} maxLength={24} required pattern="[A-Za-z0-9_]+" /></label>}
-      <label>Email address<input name="email" type="email" autoComplete="email" required /></label>
-      <label>Password<input name="password" type="password" autoComplete={registering ? "new-password" : "current-password"} minLength={8} required /></label>
-      <button className="button auth-submit" disabled={busy}>{busy ? "One moment..." : registering ? "Create player account" : "Enter the arena"}</button>
-      {message && <p className="form-notice" role="status">{message}</p>}
-      <p className="auth-switch">{registering ? "Already have an account?" : "New to the community?"} <Link href={registering ? "/login" : "/register"}>{registering ? "Log in" : "Create an account"}</Link></p>
-      {!registering && <button className="text-button" formAction={async (formData) => { const client = createSupabaseBrowserClient(); if (!client) { setMessage("Configure Supabase first."); return; } const { error } = await client.auth.resetPasswordForEmail(String(formData.get("email") ?? "")); setMessage(error?.message ?? "Password reset link sent if that email is registered."); }}>Forgot password?</button>}
+    <form className="form" onSubmit={(event) => void submit(event)} noValidate={false}>
+      {mode === "register" && (
+        <label className="field"><span>Player name</span><input name="username" autoComplete="username" minLength={3} maxLength={24} required pattern="[A-Za-z0-9_]+" title="3-24 letters, numbers, or underscores" placeholder="ace_sniper" /></label>
+      )}
+      <label className="field"><span>Email address</span><input name="email" type="email" autoComplete="email" required placeholder="you@example.com" /></label>
+      {mode !== "forgot" && (
+        <label className="field">
+          <span className="spread"><span>Password</span>{mode === "login" && <button className="text-btn" type="button" onClick={() => { setMode("forgot"); setFeedback(null); }}>Forgot password?</button>}</span>
+          <input name="password" type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} minLength={8} required />
+          {mode === "register" && <small>At least 8 characters.</small>}
+        </label>
+      )}
+      <button className="btn btn-primary btn-block" type="submit" disabled={busy}>
+        <SubmitLabel busy={busy} busyText="One moment…">{mode === "register" ? "Create account" : mode === "forgot" ? "Send reset link" : "Enter the arena"}</SubmitLabel>
+      </button>
+      <FeedbackNotice feedback={feedback} />
+      <p className="auth-foot">
+        {mode === "forgot" ? <button className="text-btn" type="button" onClick={() => { setMode("login"); setFeedback(null); }}>← Back to log in</button>
+          : mode === "register" ? <>Already have an account? <Link className="link" href={`/login${next !== "/dashboard" ? `?next=${encodeURIComponent(next)}` : ""}`}>Log in</Link></>
+          : <>New to ARENA? <Link className="link" href={`/register${next !== "/dashboard" ? `?next=${encodeURIComponent(next)}` : ""}`}>Create an account</Link></>}
+      </p>
     </form>
   );
 }

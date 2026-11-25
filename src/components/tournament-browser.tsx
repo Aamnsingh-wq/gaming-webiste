@@ -1,57 +1,64 @@
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
-import { ArrowUpRight, CalendarDays, ChevronDown, Users } from "lucide-react";
-import type { Tournament, TournamentResponse } from "@/lib/platform-types";
+import { useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Search, Trophy } from "lucide-react";
+import { TournamentCard } from "@/components/tournament-card";
+import { EmptyState } from "@/components/ui";
+import { GAMES } from "@/lib/games";
+import type { Tournament } from "@/lib/platform-types";
 
-const gameLabels: Record<string, string> = {
-  bgmi: "BGMI",
-  "brawl-stars": "Brawl Stars",
-  minecraft: "Minecraft",
-  "free-fire": "Free Fire",
-  valorant: "VALORANT",
-};
+const STATUS_FILTERS = [
+  { value: "active", label: "Active" },
+  { value: "registration_open", label: "Open" },
+  { value: "live", label: "Live" },
+  { value: "completed", label: "Completed" },
+];
 
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-IN", { day: "2-digit", month: "short", timeZone: "Asia/Kolkata" }).format(new Date(value));
-}
+export function TournamentBrowser({ tournaments }: { tournaments: Tournament[] }) {
+  const params = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const [query, setQuery] = useState("");
+  const game = params.get("game") ?? "all";
+  const status = params.get("status") ?? "active";
 
-export function TournamentBrowser({ initialData }: { initialData: TournamentResponse }) {
-  const [game, setGame] = useState("all");
-  const [message, setMessage] = useState("");
-  const tournaments = initialData.tournaments.filter((item) => game === "all" || item.game === game);
+  const setParam = (key: string, value: string, fallback: string) => {
+    const next = new URLSearchParams(params);
+    if (value === fallback) next.delete(key); else next.set(key, value);
+    router.replace(`${pathname}${next.size ? `?${next}` : ""}`, { scroll: false });
+  };
 
-  async function register(tournament: Tournament) {
-    setMessage("");
-    if (initialData.source === "preview") {
-      setMessage("Connect Supabase to enable registrations. Preview entries are not saved.");
-      return;
-    }
-    const response = await fetch(`/api/tournaments/${tournament.id}/register`, { method: "POST" });
-    const result = await response.json();
-    setMessage(response.ok ? "Request sent. Your registration is pending review." : result.error);
-  }
+  const visible = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return tournaments
+      .filter((item) => game === "all" || item.game === game)
+      .filter((item) => (status === "active" ? item.status !== "completed" : item.status === status))
+      .filter((item) => !needle || item.name.toLowerCase().includes(needle))
+      .sort((a, b) => (status === "completed" ? b.startsAt.localeCompare(a.startsAt) : 0));
+  }, [tournaments, game, status, query]);
 
   return (
     <>
-      <div className="tournament-toolbar">
-        <div><p className="eyebrow">Pick your next fight</p><h2>Open registrations<span className="heading-count"> / {tournaments.length.toString().padStart(2, "0")}</span></h2></div>
-        <label className="filter-select"><span className="sr-only">Filter by game</span><select value={game} onChange={(event) => setGame(event.target.value)}><option value="all">All games</option>{Object.entries(gameLabels).map(([slug, label]) => <option key={slug} value={slug}>{label}</option>)}</select><ChevronDown size={16} /></label>
+      <div className="toolbar">
+        <div className="chip-group" role="group" aria-label="Filter by status">
+          {STATUS_FILTERS.map((filter) => (
+            <button key={filter.value} className="chip" type="button" aria-pressed={status === filter.value} onClick={() => setParam("status", filter.value, "active")}>{filter.label}</button>
+          ))}
+        </div>
+        <label className="search"><Search size={16} /><span className="sr-only">Search tournaments</span><input type="search" placeholder="Search tournaments" value={query} onChange={(event) => setQuery(event.target.value)} /></label>
       </div>
-      <div className="tournament-grid">
-        {tournaments.map((tournament, index) => (
-          <article className="tournament-card" key={tournament.id} style={{ "--card-accent": tournament.accent } as React.CSSProperties}>
-            <div className="card-topline"><span className="game-label">{gameLabels[tournament.game] ?? tournament.game}</span><span className="open-indicator"><i /> OPEN</span></div>
-            <div className={`game-art art-${tournament.game}`}><span className="art-index">0{index + 1}</span><span className="art-wordmark">{gameLabels[tournament.game]}</span></div>
-            <div className="tournament-info"><h3>{tournament.name}</h3><div className="tournament-meta"><span><CalendarDays size={14} /> {formatDate(tournament.startsAt)}</span><span><Users size={14} /> {tournament.entryCount}/{tournament.capacity}</span></div>
-              <div className="card-bottom"><div><span className="prize-caption">PRIZE POOL</span><strong>{tournament.prizeLabel}</strong></div><button className="icon-button" aria-label={`Register for ${tournament.name}`} onClick={() => void register(tournament)}><ArrowUpRight size={18} /></button></div>
-            </div>
-          </article>
+      <div className="chip-group" role="group" aria-label="Filter by game" style={{ marginBottom: 28 }}>
+        <button className="chip" type="button" aria-pressed={game === "all"} onClick={() => setParam("game", "all", "all")}>All games</button>
+        {GAMES.map((item) => (
+          <button key={item.slug} className="chip" type="button" aria-pressed={game === item.slug} onClick={() => setParam("game", item.slug, "all")}>{item.name}</button>
         ))}
       </div>
-      {message && <p className="form-notice" role="status">{message}</p>}
-      {initialData.source === "preview" && <p className="preview-note">PREVIEW DATA <span>Connect Supabase to publish live events and accept registrations.</span> <Link href="/login">Configure account <ArrowUpRight size={13} /></Link></p>}
+      {visible.length ? (
+        <div className="tournament-grid">{visible.map((tournament, index) => <TournamentCard key={tournament.id} tournament={tournament} index={index} />)}</div>
+      ) : (
+        <EmptyState icon={Trophy} title="No tournaments match">Try another game or status filter — new events are published every week.</EmptyState>
+      )}
     </>
   );
 }

@@ -1,23 +1,20 @@
-import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { z } from "zod";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { TAGS } from "@/lib/data/public";
+import { dbError, handler, json, parseBody, requireUser, type RouteParams } from "@/lib/http";
 
-const redeemSchema = z.object({ idempotencyKey: z.string().trim().min(8).max(128).optional() });
+const redeemSchema = z.object({ idempotencyKey: z.string().trim().regex(/^[A-Za-z0-9-]{8,64}$/).optional() });
 
-export async function POST(request: Request, context: { params: Promise<{ id: string }> }) {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return NextResponse.json({ error: "Supabase is not configured." }, { status: 503 });
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError || !authData.user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-  const parsed = redeemSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid redemption request." }, { status: 400 });
+export const POST = handler(async (request: Request, context: RouteParams) => {
+  const { supabase, user } = await requireUser();
+  const input = await parseBody(request, redeemSchema);
   const { id } = await context.params;
-  const key = parsed.data.idempotencyKey ?? `redemption:${authData.user.id}:${id}:${crypto.randomUUID()}`;
+  // Namespace the client key by player + reward so it can never collide with
+  // another player's or an admin's ledger keys.
+  const key = `redemption:${user.id}:${id}:${input.idempotencyKey ?? crypto.randomUUID()}`;
   const { data, error } = await supabase.rpc("redeem_reward", { target_reward: id, transaction_key: key });
-  if (error) {
-    const status = /sign in/i.test(error.message) ? 401 : /not available|stock/i.test(error.message) ? 404 : 409;
-    return NextResponse.json({ error: error.message }, { status });
-  }
-  if (data === null) return NextResponse.json({ status: "already_redeemed", idempotent: true });
-  return NextResponse.json({ transactionId: data, status: "redeemed" }, { status: 201 });
-}
+  if (error) throw dbError(error, "Reward could not be redeemed.");
+  revalidateTag(TAGS.catalog);
+  if (data === null) return json({ status: "already_redeemed", idempotent: true });
+  return json({ transactionId: data, status: "redeemed" }, 201);
+});

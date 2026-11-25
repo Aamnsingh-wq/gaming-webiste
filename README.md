@@ -26,8 +26,8 @@ Without Supabase credentials the public tournament board uses clearly labeled de
 ## Supabase setup
 
 1. Create a Supabase project and copy its project URL and anon key into `.env.local`.
-2. Apply `supabase/migrations/0001_platform.sql` using the Supabase CLI (`supabase db push`) or SQL editor.
-3. Configure Supabase Auth email verification and the local/deployed redirect URLs.
+2. Apply **all** migrations in order — `0001_platform.sql`, `0002_platform_workflows.sql`, `0003_hardening_and_workflows.sql` — with the Supabase CLI (`supabase db push`) or the SQL editor. `0003` is additive, data-preserving and safe to re-run; it grants table privileges (without it every query fails with `permission denied`), hardens RLS, and adds the team/registration/bracket/leaderboard functions.
+3. Configure Supabase Auth email verification and add `<site>/auth/callback` to the allowed redirect URLs (used by email confirmation and password reset).
 4. Create the first administrator through an operationally controlled process; never accept a role from signup metadata. The `profiles.role` field is server controlled by RLS.
 5. Enable Realtime on `notifications` if live inbox updates are added.
 
@@ -37,10 +37,19 @@ Do not expose a service-role key to the browser. Provider credentials belong onl
 
 ```powershell
 npm run dev
-npm run test
+npm run test       # unit tests (bracket, scoring, validation)
+npm run test:db    # runs all migrations on PGlite and exercises RLS + workflows (55 checks)
+npm run typecheck
 npm run lint
 npm run build
 ```
+
+## Performance model
+
+- Public data (tournament feed, event pages, leaderboards, teams, rewards) is read with a cookie-less anon client and cached in the Next.js data cache (`src/lib/data/public.ts`, 30–300 s). Every mutation calls `revalidateTag`, so changes show instantly while normal page views skip the database.
+- Counts and rankings are aggregated in Postgres (`tournament_entry_counts`, `get_player_leaderboard`, `get_team_leaderboard`) instead of downloading rows.
+- Per-request work is parallelised (`Promise.all`) and de-duplicated with React `cache()`; sessions are validated with `getClaims()` (local JWT verification with asymmetric keys).
+- Hot lookups are indexed in `0003`.
 
 ## Current implementation boundary
 

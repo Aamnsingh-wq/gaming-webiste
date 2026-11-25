@@ -1,29 +1,22 @@
-import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { dbError, handler, json, parseBody, requireUser } from "@/lib/http";
 
-export async function GET() {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return NextResponse.json({ error: "Supabase is not configured." }, { status: 503 });
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
+export const GET = handler(async () => {
+  const { supabase, user } = await requireUser();
   const { data, error } = await supabase.from("notifications").select("id, kind, title, body, read_at, created_at").eq("player_id", user.id).order("created_at", { ascending: false }).limit(50);
-  if (error) return NextResponse.json({ error: "Notifications could not be loaded." }, { status: 500 });
-  return NextResponse.json({ notifications: data ?? [] });
-}
+  if (error) throw dbError(error, "Notifications could not be loaded.");
+  return json({ notifications: data ?? [] });
+});
 
-const readSchema = z.object({ notificationIds: z.array(z.string().uuid()).max(50).optional(), readAll: z.boolean().optional() });
+const readSchema = z.object({ notificationIds: z.array(z.string().uuid()).max(50).optional(), readAll: z.boolean().optional() })
+  .refine((value) => value.readAll || value.notificationIds?.length, { message: "Pass notificationIds or readAll." });
 
-export async function PATCH(request: Request) {
-  const supabase = await createSupabaseServerClient();
-  if (!supabase) return NextResponse.json({ error: "Supabase is not configured." }, { status: 503 });
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Sign in required." }, { status: 401 });
-  const parsed = readSchema.safeParse(await request.json().catch(() => null));
-  if (!parsed.success) return NextResponse.json({ error: "Invalid notification update." }, { status: 400 });
+export const PATCH = handler(async (request: Request) => {
+  const { supabase, user } = await requireUser();
+  const input = await parseBody(request, readSchema);
   let query = supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("player_id", user.id).is("read_at", null);
-  if (parsed.data.notificationIds?.length) query = supabase.from("notifications").update({ read_at: new Date().toISOString() }).eq("player_id", user.id).in("id", parsed.data.notificationIds);
+  if (!input.readAll && input.notificationIds?.length) query = query.in("id", input.notificationIds);
   const { error } = await query;
-  if (error) return NextResponse.json({ error: "Notifications could not be updated." }, { status: 400 });
-  return NextResponse.json({ updated: true });
-}
+  if (error) throw dbError(error, "Notifications could not be updated.");
+  return json({ updated: true });
+});
