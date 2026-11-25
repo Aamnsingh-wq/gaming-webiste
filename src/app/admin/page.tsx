@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { BadgeCheck, ClipboardList, Coins, Gift, LayoutDashboard, ScrollText, Shield, Swords, Trophy, Users } from "lucide-react";
+import { BadgeCheck, ClipboardList, Coins, Gift, LayoutDashboard, Plus, ScrollText, Shield, Swords, Trophy, Users } from "lucide-react";
 import { AwardPointsForm, CreateRewardForm, CreateTournamentForm, ReviewButtons, RewardToggle, TournamentActions, VerifyMatch } from "@/components/admin-controls";
 import { Badge, EmptyState, Stat } from "@/components/ui";
 import { getAdminOverview } from "@/lib/data/admin";
@@ -78,6 +78,15 @@ function OverviewTab({ overview }: { overview: Overview }) {
         <Stat icon={Trophy} label="Active events" value={overview.activeTournaments} accent="var(--lime)" />
         <Stat icon={Trophy} label="Completed" value={overview.completedTournaments} accent="var(--text-3)" />
       </div>
+      <section className="card panel-glow">
+        <h2 className="card-title">Quick actions</h2>
+        <p className="card-sub">Create an event, then open registration from the Tournaments tab so players can join.</p>
+        <div className="row">
+          <Link className="btn btn-primary" href="/admin?tab=tournaments#create"><Plus size={16} />Create tournament</Link>
+          <Link className="btn btn-neon" href="/admin?tab=rewards">Add reward</Link>
+          <Link className="btn btn-ghost" href="/admin?tab=points">Award points</Link>
+        </div>
+      </section>
       <section className="card"><h2 className="card-title">Action queue</h2>
         <ul className="list">{queues.map((queue) => <li key={queue.href} className="list-item"><span><strong style={{ fontFamily: "var(--font-display)", fontSize: 22, marginRight: 10, color: queue.value ? "var(--amber)" : "var(--text-3)" }}>{queue.value}</strong>{queue.label}</span><Link className="link" href={queue.href}>Open</Link></li>)}</ul>
       </section>
@@ -89,6 +98,7 @@ async function TournamentsTab({ supabase }: { supabase: SupabaseClient }) {
   const { data } = await supabase.from("tournaments").select("id, slug, name, status, format, starts_at, capacity, team_size, game:games(slug)").order("starts_at", { ascending: false }).limit(100);
   return (
     <>
+      <details id="create" className="card details panel-glow" open><summary>Create a tournament <span className="badge">Starts as draft</span></summary><CreateTournamentForm /></details>
       <section className="card">
         <h2 className="card-title" style={{ marginBottom: 18 }}>All tournaments</h2>
         {data?.length ? (
@@ -102,9 +112,8 @@ async function TournamentsTab({ supabase }: { supabase: SupabaseClient }) {
               </tr>
             ))}
           </tbody></table></div>
-        ) : <EmptyState icon={Trophy} title="No tournaments yet">Create your first draft below.</EmptyState>}
+        ) : <EmptyState icon={Trophy} title="No tournaments yet">Create your first draft above, then click “Open registration”.</EmptyState>}
       </section>
-      <details className="card details" open={!data?.length}><summary>Create a tournament <span className="badge">Draft</span></summary><CreateTournamentForm /></details>
     </>
   );
 }

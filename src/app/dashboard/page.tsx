@@ -50,6 +50,7 @@ export default async function DashboardPage() {
           </div>
         </div>
         <div className="row">
+          {viewer.isAdmin && <Link className="btn btn-neon" href="/admin"><Shield size={16} />Admin panel</Link>}
           <Link className="btn btn-primary" href="/tournaments"><Swords size={16} />Find a match</Link>
           <form action="/auth/signout" method="post"><button className="btn btn-ghost" type="submit"><LogOut size={16} />Log out</button></form>
         </div>
